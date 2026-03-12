@@ -1,0 +1,4 @@
+{
+    "command": "python3 -m venv venv && source venv/bin/activate && pip install -r requirements.txt",
+    "working_directory": "/home/kavia/workspace/code-generation/video-inference-pipeline-with-yolo-detection-22748-22762/python_inference_pipeline"
+}
