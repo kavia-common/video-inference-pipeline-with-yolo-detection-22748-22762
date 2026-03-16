@@ -66,6 +66,7 @@ def _ensure_dirs(cfg: PipelineConfig) -> None:
     cfg.output_dir.mkdir(parents=True, exist_ok=True)
     cfg.failed_frames_dir.mkdir(parents=True, exist_ok=True)
     cfg.failed_labels_dir.mkdir(parents=True, exist_ok=True)
+    cfg.extracted_frames_dir.mkdir(parents=True, exist_ok=True)
 
 
 def _resolve_inputs(cfg: PipelineConfig) -> Path:
@@ -158,6 +159,24 @@ def _frame_timestamp_ms(cap: cv2.VideoCapture) -> int:
         return 0
 
 
+def _maybe_save_extracted_frame(cfg: PipelineConfig, frame_index: int, frame_bgr: np.ndarray) -> Optional[Path]:
+    """
+    Save a raw extracted frame to cfg.extracted_frames_dir (JPEG) if configured.
+
+    Returns the saved path, or None if saving is disabled.
+    """
+    if not cfg.save_extracted_frames:
+        return None
+
+    out_path = cfg.extracted_frames_dir / f"frame_{frame_index:06d}.jpg"
+    # cv2.imwrite returns bool; if it fails we just warn (do not fail the whole pipeline).
+    ok = cv2.imwrite(str(out_path), frame_bgr)
+    if not ok:
+        logger.warning("Failed to write extracted frame: %s", out_path)
+        return None
+    return out_path
+
+
 # PUBLIC_INTERFACE
 def run_pipeline(cfg: PipelineConfig) -> PipelineResult:
     """
@@ -223,10 +242,19 @@ def run_pipeline(cfg: PipelineConfig) -> PipelineResult:
         if cfg.max_frames is not None and total_frames_read > cfg.max_frames:
             break
 
+        # Optionally save extracted frames locally.
+        # - If SAVE_ONLY_PROCESSED_FRAMES=true, we only save frames we actually run inference on.
+        # - If false, we save every frame read, including skipped ones.
+        if cfg.save_extracted_frames and not cfg.save_only_processed_frames:
+            _maybe_save_extracted_frame(cfg, frame_index, frame)
+
         # Always write original frame if skipping, so output video aligns to input
         if frame_index % cfg.frame_stride != 0:
             writer.write(frame)
             continue
+
+        if cfg.save_extracted_frames and cfg.save_only_processed_frames:
+            _maybe_save_extracted_frame(cfg, frame_index, frame)
 
         total_frames_processed += 1
         timestamp_ms = _frame_timestamp_ms(cap)

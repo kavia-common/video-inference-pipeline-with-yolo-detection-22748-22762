@@ -38,6 +38,7 @@ class PipelineConfig:
     annotated_video_path: Path
     failed_frames_dir: Path
     failed_labels_dir: Path
+    extracted_frames_dir: Path
     per_frame_csv_path: Path
     summary_csv_path: Path
 
@@ -45,6 +46,10 @@ class PipelineConfig:
     device: Optional[str]
     max_frames: Optional[int]
     frame_stride: int
+
+    # Local frame extraction
+    save_extracted_frames: bool
+    save_only_processed_frames: bool
 
 
 def _strip_wrapping_quotes(value: str) -> str:
@@ -112,6 +117,15 @@ def _parse_int(name: str, default: str) -> int:
         raise ValueError(f"Invalid int for {name}: {val}") from e
 
 
+def _parse_bool(name: str, default: str = "false") -> bool:
+    val = (_get_env(name, default) or default).strip().lower()
+    if val in {"1", "true", "t", "yes", "y", "on"}:
+        return True
+    if val in {"0", "false", "f", "no", "n", "off"}:
+        return False
+    raise ValueError(f"Invalid bool for {name}: {val}")
+
+
 # PUBLIC_INTERFACE
 def load_config(env_file: Optional[Path] = None) -> PipelineConfig:
     """
@@ -149,6 +163,11 @@ def load_config(env_file: Optional[Path] = None) -> PipelineConfig:
     - DEVICE: e.g. "cpu", "0"
     - MAX_FRAMES: limit frames processed
     - FRAME_STRIDE: process every Nth frame (default 1)
+
+    Local extracted frames (saved to OUTPUT_DIR/extracted_frames):
+    - SAVE_EXTRACTED_FRAMES: true/false (default false). If true, writes extracted JPG frames locally.
+    - SAVE_ONLY_PROCESSED_FRAMES: true/false (default true). If true, only saves frames that are
+      actually processed (i.e., those matching FRAME_STRIDE). If false, saves every frame read.
     """
     if env_file is not None:
         load_dotenv(env_file)
@@ -174,11 +193,17 @@ def load_config(env_file: Optional[Path] = None) -> PipelineConfig:
     if frame_stride <= 0:
         raise ValueError("FRAME_STRIDE must be >= 1")
 
+    # Outputs (always local)
     annotated_video_path = output_dir / "annotated.mp4"
     failed_frames_dir = output_dir / "failed_frames"
     failed_labels_dir = output_dir / "failed_labels"
+    extracted_frames_dir = output_dir / "extracted_frames"
     per_frame_csv_path = output_dir / "per_frame_report.csv"
     summary_csv_path = output_dir / "summary_report.csv"
+
+    # Optional local frame extraction
+    save_extracted_frames = _parse_bool("SAVE_EXTRACTED_FRAMES", "false")
+    save_only_processed_frames = _parse_bool("SAVE_ONLY_PROCESSED_FRAMES", "true")
 
     return PipelineConfig(
         work_dir=work_dir,
@@ -193,9 +218,12 @@ def load_config(env_file: Optional[Path] = None) -> PipelineConfig:
         annotated_video_path=annotated_video_path,
         failed_frames_dir=failed_frames_dir,
         failed_labels_dir=failed_labels_dir,
+        extracted_frames_dir=extracted_frames_dir,
         per_frame_csv_path=per_frame_csv_path,
         summary_csv_path=summary_csv_path,
         device=device,
         max_frames=max_frames,
         frame_stride=frame_stride,
+        save_extracted_frames=save_extracted_frames,
+        save_only_processed_frames=save_only_processed_frames,
     )

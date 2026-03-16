@@ -37,13 +37,25 @@ From `python_inference_pipeline/`:
 pip install -r requirements.txt
 ```
 
-### 3) Run the pipeline
+### 3) Run the pipeline (local)
 From `python_inference_pipeline/`:
 ```bash
 python main.py run
 ```
 
 Outputs will be written to `OUTPUT_DIR` (default: `WORK_DIR/outputs`).
+
+#### Local extracted frames (optional)
+If you want the pipeline to also save extracted frames as JPGs locally, set:
+```env
+SAVE_EXTRACTED_FRAMES=true
+# Save every frame read (including stride-skipped frames) if false:
+SAVE_ONLY_PROCESSED_FRAMES=true
+```
+
+Frames will be written to:
+- `OUTPUT_DIR/extracted_frames/*.jpg`
+=======
 
 ## Optional: use S3
 S3 is optional. If you set these env vars, the pipeline will download inputs from S3:
