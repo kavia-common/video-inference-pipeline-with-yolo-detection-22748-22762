@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import shutil
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -21,6 +22,7 @@ logger = logging.getLogger(__name__)
 @dataclass(frozen=True)
 class FrameFailure:
     """Represents a frame that failed requirements (no detections or low confidence)."""
+
     frame_index: int
     timestamp_ms: int
     reason: str
@@ -32,6 +34,7 @@ class FrameFailure:
 @dataclass(frozen=True)
 class FrameDetectionRow:
     """Row for per-frame CSV."""
+
     frame_index: int
     timestamp_ms: int
     num_detections: int
@@ -43,6 +46,7 @@ class FrameDetectionRow:
 @dataclass(frozen=True)
 class PipelineResult:
     """Result object returned by the pipeline."""
+
     annotated_video_path: str
     per_frame_csv_path: str
     summary_csv_path: str
@@ -65,6 +69,13 @@ def _ensure_dirs(cfg: PipelineConfig) -> None:
 
 
 def _resolve_inputs(cfg: PipelineConfig) -> Path:
+    """
+    Resolve the input video location.
+
+    Priority:
+    1) S3_VIDEO_URI (download into WORK_DIR)
+    2) INPUT_VIDEO (local file path)
+    """
     if cfg.s3_video_uri:
         local_video_path = cfg.work_dir / "input_video"
         # try to keep extension if present
@@ -83,7 +94,13 @@ def _resolve_inputs(cfg: PipelineConfig) -> Path:
 
 
 def _resolve_model(cfg: PipelineConfig) -> Path:
-    # If MODEL_SOURCE is S3, download it. Otherwise treat it as a local path.
+    """
+    Resolve the model weights file.
+
+    - If MODEL_SOURCE starts with s3://, downloads to MODEL_LOCAL_PATH.
+    - Otherwise treats MODEL_SOURCE as a local filesystem path and (if different)
+      copies it to MODEL_LOCAL_PATH for consistent downstream usage.
+    """
     if cfg.model_source.startswith("s3://"):
         logger.info("Downloading model from S3: %s -> %s", cfg.model_source, cfg.model_local_path)
         return download_from_s3(cfg.model_source, cfg.model_local_path)
@@ -91,14 +108,18 @@ def _resolve_model(cfg: PipelineConfig) -> Path:
     src = Path(cfg.model_source).expanduser().resolve()
     if not src.exists():
         raise FileNotFoundError(f"MODEL_SOURCE not found: {src}")
+
     if src != cfg.model_local_path:
         cfg.model_local_path.parent.mkdir(parents=True, exist_ok=True)
-        # Copy to work_dir path for consistency
-        cfg.model_local_path.write_bytes(src.read_bytes())
+        # Use a streaming copy for large weights; avoids loading entire file in memory.
+        shutil.copy2(src, cfg.model_local_path)
+
     return cfg.model_local_path
 
 
-def _draw_boxes(frame_bgr: np.ndarray, boxes_xyxy: np.ndarray, conf: np.ndarray, cls: np.ndarray, names: Dict[int, str]) -> None:
+def _draw_boxes(
+    frame_bgr: np.ndarray, boxes_xyxy: np.ndarray, conf: np.ndarray, cls: np.ndarray, names: Dict[int, str]
+) -> None:
     for (x1, y1, x2, y2), c, cl in zip(boxes_xyxy.astype(int), conf, cls.astype(int)):
         label = f"{names.get(int(cl), str(cl))} {float(c):.2f}"
         cv2.rectangle(frame_bgr, (x1, y1), (x2, y2), (59, 130, 246), 2)  # blue-ish
@@ -160,6 +181,10 @@ def run_pipeline(cfg: PipelineConfig) -> PipelineResult:
 
     video_path = _resolve_inputs(cfg)
     model_path = _resolve_model(cfg)
+
+    logger.info("Input video: %s", video_path)
+    logger.info("Model weights: %s", model_path)
+    logger.info("Outputs directory: %s", cfg.output_dir)
 
     logger.info("Loading YOLO model from: %s", model_path)
     model = YOLO(str(model_path))

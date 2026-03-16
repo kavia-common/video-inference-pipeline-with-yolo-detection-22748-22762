@@ -4,6 +4,7 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
+from urllib.parse import urlparse
 
 from dotenv import load_dotenv
 
@@ -46,8 +47,35 @@ class PipelineConfig:
     frame_stride: int
 
 
+def _strip_wrapping_quotes(value: str) -> str:
+    value = value.strip()
+    if len(value) >= 2 and ((value[0] == value[-1] == '"') or (value[0] == value[-1] == "'")):
+        return value[1:-1].strip()
+    return value
+
+
 def _as_path(value: str) -> Path:
-    return Path(value).expanduser().resolve()
+    """
+    Convert a user-provided string into an absolute Path.
+
+    Supports:
+    - Windows paths (C:\\..., C:/...)
+    - Relative paths (resolved against current working dir)
+    - Quoted paths
+    - file:// URIs
+    """
+    v = _strip_wrapping_quotes(value)
+
+    # Support file:// URIs (common when copying from some tools)
+    if v.lower().startswith("file://"):
+        parsed = urlparse(v)
+        # For Windows file URIs, parsed.path may look like /C:/path...
+        file_path = parsed.path
+        if file_path.startswith("/") and len(file_path) >= 3 and file_path[2] == ":":
+            file_path = file_path[1:]
+        v = file_path
+
+    return Path(v).expanduser().resolve()
 
 
 def _get_env(name: str, default: Optional[str] = None) -> Optional[str]:
@@ -101,20 +129,26 @@ def load_config(env_file: Optional[Path] = None) -> PipelineConfig:
 
     Environment variables
     ---------------------
-    Required/commonly used:
-    - WORK_DIR: base working directory
-    - OUTPUT_DIR: base output directory
-    - MODEL_SOURCE: local path or s3://bucket/key to model weights
-    - INPUT_VIDEO: local path to input video (optional if S3_VIDEO_URI provided)
+    Local-first (recommended for VS Code / Windows):
+    - WORK_DIR: base working directory (default: ./work)
+    - OUTPUT_DIR: base output directory (default: WORK_DIR/outputs)
+    - MODEL_SOURCE: local filesystem path to model weights (e.g. C:\\models\\best.pt)
+                   OR an S3 URI s3://bucket/key
+    - INPUT_VIDEO: local filesystem path to input video (e.g. C:\\videos\\input.mp4)
+                   Optional if S3_VIDEO_URI provided.
+
+    Optional S3:
     - S3_VIDEO_URI: s3://bucket/key to input video
+    - S3_OUTPUT_PREFIX: s3://bucket/prefix to upload outputs (not required; local outputs always written)
+
+    Thresholds:
     - CONF_THRESHOLD: detection confidence threshold (default 0.25)
     - IOU_THRESHOLD: NMS IoU threshold (default 0.45)
 
-    Optional:
+    Runtime:
     - DEVICE: e.g. "cpu", "0"
     - MAX_FRAMES: limit frames processed
     - FRAME_STRIDE: process every Nth frame (default 1)
-    - S3_OUTPUT_PREFIX: s3://bucket/prefix to upload outputs (not required)
     """
     if env_file is not None:
         load_dotenv(env_file)
